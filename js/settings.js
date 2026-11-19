@@ -1,0 +1,147 @@
+import { sb, q } from './db.js';
+import { state, COLORS, chip, me, memberOptions, loadMembers, loadSettings } from './state.js';
+import { esc, modal, toast, errMsg } from './util.js';
+
+/** ctx: { switchUser, logout, refreshHeader } */
+export async function renderSettings(el, ctx) {
+  const s = state.settings;
+  el.innerHTML = `
+    <section class="card">
+      <h2 class="card-title">この端末</h2>
+      <div class="list-row plain">
+        <span class="grow">使っている人：${chip(me())}</span>
+        <button type="button" class="btn ghost small" data-switch>切り替え</button>
+      </div>
+      <div class="row-end"><button type="button" class="btn danger-ghost" data-logout>ログアウト</button></div>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">メンバー</h2>
+      <div class="list" data-members></div>
+      <div class="row-end"><button type="button" class="btn ghost" data-add-member>＋ メンバーを追加</button></div>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">ハウスの設定</h2>
+      <form data-house class="stack">
+        <label class="field">名前
+          <input name="house_name" required maxlength="30" value="${esc(s.house_name)}">
+        </label>
+        <label class="field">毎月の家賃（初期値・円）
+          <input name="default_rent" type="number" inputmode="numeric" min="0" step="1" value="${Number(s.default_rent) || 0}">
+        </label>
+        <label class="field">いつもの支払い者
+          <select name="default_payer_id">${memberOptions(s.default_payer_id, { allowEmpty: true })}</select>
+        </label>
+        <div class="row-end"><button type="submit" class="btn primary">保存</button></div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">合言葉の変更</h2>
+      <form data-pass class="stack">
+        <p class="muted small">変更すると、他のメンバーも次回から新しい合言葉でログインします。</p>
+        <label class="field">新しい合言葉（6文字以上）
+          <input name="password" type="password" minlength="6" required autocomplete="new-password">
+        </label>
+        <div class="row-end"><button type="submit" class="btn ghost">変更する</button></div>
+      </form>
+    </section>`;
+
+  el.querySelector('[data-switch]').onclick = ctx.switchUser;
+  el.querySelector('[data-logout]').onclick = () => { if (confirm('この端末からログアウトしますか？')) ctx.logout(); };
+  el.querySelector('[data-add-member]').onclick = () => openMemberForm(el, ctx, {});
+
+  drawMembers(el, ctx);
+
+  el.querySelector('[data-house]').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const v = new FormData(f);
+    try {
+      await q(sb.from('settings').upsert({
+        id: 1,
+        house_name: String(v.get('house_name')).trim() || 'セカンドハウス',
+        default_rent: Math.max(0, Math.round(Number(v.get('default_rent')) || 0)),
+        default_payer_id: v.get('default_payer_id') || null,
+      }));
+      await loadSettings();
+      ctx.refreshHeader();
+      toast('保存しました');
+    } catch (err) { toast(errMsg(err), 'error'); }
+  };
+
+  el.querySelector('[data-pass]').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const pw = f.password.value;
+    if (pw.length < 6) { toast('6文字以上にしてください', 'error'); return; }
+    if (!confirm('合言葉を変更しますか？\n新しい合言葉をメンバーに伝えてください。')) return;
+    const { error } = await sb.auth.updateUser({ password: pw });
+    if (error) { toast(errMsg(error), 'error'); return; }
+    f.reset();
+    toast('合言葉を変更しました');
+  };
+}
+
+function drawMembers(el, ctx) {
+  const list = el.querySelector('[data-members]');
+  list.innerHTML = state.members.length
+    ? state.members.map((m) => `
+      <button type="button" class="list-row" data-id="${m.id}">
+        ${chip(m)}
+        <span class="grow muted small">${m.active ? '' : '退出済み'}${m.id === state.meId ? '（あなた）' : ''}</span>
+        <span class="chev">›</span>
+      </button>`).join('')
+    : '<p class="empty">メンバーがいません</p>';
+  list.onclick = (e) => {
+    const row = e.target.closest('[data-id]');
+    if (row) openMemberForm(el, ctx, state.members.find((m) => m.id === row.dataset.id));
+  };
+}
+
+export function memberFormContent(m) {
+  const color = m.color || COLORS[state.members.length % COLORS.length];
+  return `
+    <label class="field">名前
+      <input name="name" required maxlength="30" value="${esc(m.name || '')}" placeholder="例：たろう">
+    </label>
+    <div class="field">色
+      <div class="swatches">
+        ${COLORS.map((c) => `
+          <label class="swatch" style="--c:${c}">
+            <input type="radio" name="color" value="${c}" ${c === color ? 'checked' : ''} aria-label="${c}">
+          </label>`).join('')}
+      </div>
+    </div>
+    ${m.id ? `<label class="check"><input type="checkbox" name="active" ${m.active ? 'checked' : ''}> 現在のメンバー（外すと精算の対象外になります）</label>` : ''}`;
+}
+
+export async function saveMember(form, m) {
+  const v = new FormData(form);
+  const row = { name: String(v.get('name')).trim(), color: v.get('color') || COLORS[0] };
+  if (!row.name) { toast('名前を入力してください', 'error'); return null; }
+  if (m.id) {
+    row.active = v.get('active') === 'on';
+    await q(sb.from('members').update(row).eq('id', m.id));
+    return m.id;
+  }
+  const [created] = await q(sb.from('members').insert({ ...row, sort_order: state.members.length }).select());
+  return created.id;
+}
+
+function openMemberForm(el, ctx, m) {
+  modal({
+    title: m.id ? 'メンバーを編集' : 'メンバーを追加',
+    content: memberFormContent(m),
+    submitLabel: m.id ? '保存' : '追加',
+    onSubmit: async (form) => {
+      const id = await saveMember(form, m);
+      if (!id) return false;
+      await loadMembers();
+      ctx.refreshHeader();
+      toast('保存しました');
+      drawMembers(el, ctx);
+    },
+  });
+}
