@@ -1,4 +1,4 @@
-import { sb, q } from './db.js';
+import { db } from './db.js';
 import { esc } from './util.js';
 
 export const COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#64748b'];
@@ -10,12 +10,15 @@ export const state = {
 };
 
 export async function loadMembers() {
-  state.members = await q(sb.from('members').select('*').order('sort_order').order('created_at'));
+  const list = await db.list('members');
+  list.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+    String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')));
+  state.members = list.map((m) => ({ ...m, active: m.active !== false }));
 }
 
 export async function loadSettings() {
-  const s = await q(sb.from('settings').select('*').eq('id', 1).maybeSingle());
-  if (s) state.settings = s;
+  const s = await db.get('settings', 'main');
+  if (s) state.settings = { ...state.settings, ...s };
 }
 
 export const memberById = (id) => state.members.find((m) => m.id === id);

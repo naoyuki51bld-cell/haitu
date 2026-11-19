@@ -1,4 +1,4 @@
-import { sb, configured } from './db.js';
+import { authApi, configured } from './db.js';
 import { SHARED_EMAIL } from './config.js';
 import { state, loadMembers, loadSettings, activeMembers, memberById, chip, colorOf } from './state.js';
 import { $, esc, toast, errMsg, modal } from './util.js';
@@ -33,8 +33,8 @@ function storeSet(k, v) { try { v == null ? localStorage.removeItem(k) : localSt
 // ---------------------------------------------------------
 async function boot() {
   if (!configured) return renderNotConfigured();
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) return renderLogin();
+  await authApi.ready();
+  if (!authApi.user()) return renderLogin();
   await startApp();
 }
 
@@ -43,7 +43,7 @@ function renderNotConfigured() {
     <div class="center-screen">
       <div class="card narrow">
         <h1>初期設定が必要です</h1>
-        <p><code>js/config.js</code> に Supabase の URL と anon key を書き込んでください。</p>
+        <p><code>js/config.js</code> に Firebase の設定値を書き込んでください。</p>
         <p class="muted small">手順は README.md にあります。</p>
       </div>
     </div>`;
@@ -67,12 +67,14 @@ function renderLogin() {
     e.preventDefault();
     const btn = form.querySelector('button');
     btn.disabled = true;
-    const { error } = await sb.auth.signInWithPassword({ email: SHARED_EMAIL, password: form.password.value });
-    btn.disabled = false;
-    if (error) {
-      toast(/invalid/i.test(error.message) ? '合言葉が違います' : errMsg(error), 'error');
+    try {
+      await authApi.signIn(SHARED_EMAIL, form.password.value);
+    } catch (err) {
+      toast(errMsg(err), 'error');
       form.password.select();
       return;
+    } finally {
+      btn.disabled = false;
     }
     await startApp();
   };
@@ -143,7 +145,7 @@ function switchUser() {
 }
 
 async function logout() {
-  await sb.auth.signOut();
+  await authApi.signOut();
   state.meId = null;
   storeSet(ME_KEY, null);
   renderLogin();

@@ -1,4 +1,4 @@
-import { sb, q } from './db.js';
+import { db, orderBy, limit, serverTimestamp, deleteField } from './db.js';
 import { state, memberById, activeMembers, chip, memberOptions } from './state.js';
 import { esc, yen, ym, fmtMonth, shiftMonth, modal, toast, errMsg, $$ } from './util.js';
 
@@ -53,10 +53,9 @@ async function draw(el) {
   const target = month;
   el.querySelector('[data-title]').textContent = fmtMonth(target);
 
-  const [saved, payments, history] = await Promise.all([
-    q(sb.from('bills').select('*').eq('month', target).maybeSingle()),
-    q(sb.from('payments').select('*').eq('month', target)),
-    q(sb.from('bills').select('*').order('month', { ascending: false }).limit(24)),
+  const [saved, history] = await Promise.all([
+    db.get('bills', target),
+    db.list('bills', orderBy('month', 'desc'), limit(24)),
   ]);
   if (token !== drawToken) return;
 
@@ -92,7 +91,7 @@ async function draw(el) {
   // ---- 支払い状況 ----
   const pay = el.querySelector('[data-pay]');
   const payers = activeMembers().filter((m) => m.id !== bill.payer_id);
-  const paidIds = new Set(payments.map((p) => p.member_id));
+  const paidIds = new Set(Object.keys(bill.paid || {}));
   if (!payer) {
     pay.innerHTML = '';
   } else {
@@ -114,11 +113,9 @@ async function draw(el) {
       cb.onchange = async () => {
         cb.disabled = true;
         try {
-          if (cb.checked) {
-            await q(sb.from('payments').upsert({ month: target, member_id: cb.dataset.member }));
-          } else {
-            await q(sb.from('payments').delete().eq('month', target).eq('member_id', cb.dataset.member));
-          }
+          await db.update('bills', target, {
+            [`paid.${cb.dataset.member}`]: cb.checked ? serverTimestamp() : deleteField(),
+          });
           draw(el);
         } catch (err) {
           toast(errMsg(err), 'error');
@@ -195,14 +192,14 @@ function openForm(el, bill) {
         toast('支払い者を選んでください', 'error');
         return false;
       }
-      await q(sb.from('bills').upsert({
+      await db.set('bills', bill.month, {
         month: bill.month,
         rent: Math.max(0, Math.round(Number(v.get('rent')) || 0)),
         items,
         payer_id: v.get('payer_id'),
         split_count: Math.max(1, Math.round(Number(v.get('split_count')) || 1)),
-        updated_at: new Date().toISOString(),
-      }));
+        updated_at: serverTimestamp(),
+      });
       toast('保存しました');
       draw(el);
     },

@@ -1,16 +1,56 @@
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+import { firebaseConfig } from './config.js';
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+import {
+  getAuth, signInWithEmailAndPassword, signOut, updatePassword,
+} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+import {
+  getFirestore, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc,
+  query, where, orderBy, limit, serverTimestamp, deleteField,
+} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+
+export { where, orderBy, limit, serverTimestamp, deleteField };
 
 export const configured =
-  !!SUPABASE_URL && !!SUPABASE_ANON_KEY &&
-  !SUPABASE_URL.includes('YOUR-') && !SUPABASE_ANON_KEY.includes('YOUR-');
+  !!firebaseConfig.apiKey && !firebaseConfig.apiKey.includes('YOUR-') &&
+  !!firebaseConfig.projectId && !firebaseConfig.projectId.includes('YOUR-');
 
-export const sb = configured && window.supabase
-  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-  : null;
+const app = configured ? initializeApp(firebaseConfig) : null;
+const auth = app && getAuth(app);
+const fs = app && getFirestore(app);
 
-/** Supabase の結果を取り出す。エラーなら throw。 */
-export async function q(request) {
-  const { data, error } = await request;
-  if (error) throw error;
-  return data;
+/** Firestore のドキュメントを普通のオブジェクトに（日時は ISO 文字列に） */
+function toPlain(snap) {
+  const out = { id: snap.id };
+  for (const [k, v] of Object.entries(snap.data())) {
+    out[k] = v && typeof v.toDate === 'function' ? v.toDate().toISOString() : v;
+  }
+  return out;
 }
+
+export const db = {
+  async list(name, ...constraints) {
+    const ref = collection(fs, name);
+    const snap = await getDocs(constraints.length ? query(ref, ...constraints) : ref);
+    return snap.docs.map(toPlain);
+  },
+  async get(name, id) {
+    const snap = await getDoc(doc(fs, name, id));
+    return snap.exists() ? toPlain(snap) : null;
+  },
+  async add(name, data) {
+    const ref = await addDoc(collection(fs, name), { ...data, created_at: serverTimestamp() });
+    return ref.id;
+  },
+  /** merge: true なので、書かなかった項目は残る */
+  set: (name, id, data) => setDoc(doc(fs, name, id), data, { merge: true }),
+  update: (name, id, data) => updateDoc(doc(fs, name, id), data),
+  remove: (name, id) => deleteDoc(doc(fs, name, id)),
+};
+
+export const authApi = {
+  ready: () => auth.authStateReady(),
+  user: () => auth.currentUser,
+  signIn: (email, password) => signInWithEmailAndPassword(auth, email, password),
+  signOut: () => signOut(auth),
+  updatePassword: (pw) => updatePassword(auth.currentUser, pw),
+};

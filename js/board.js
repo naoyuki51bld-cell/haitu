@@ -1,4 +1,4 @@
-import { sb, q } from './db.js';
+import { db, orderBy, limit, serverTimestamp } from './db.js';
 import { state, memberById, chip } from './state.js';
 import { esc, linkify, fmtDateTime, modal, toast } from './util.js';
 
@@ -13,8 +13,8 @@ export async function renderBoard(el) {
 }
 
 async function draw(el) {
-  const posts = await q(sb.from('posts').select('*')
-    .order('pinned', { ascending: false }).order('created_at', { ascending: false }).limit(100));
+  const posts = await db.list('posts', orderBy('created_at', 'desc'), limit(100));
+  posts.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)); // 固定を先頭に（安定ソート）
   const list = el.querySelector('[data-list]');
   list.innerHTML = posts.length ? posts.map(postHtml).join('') : `
     <div class="card empty">
@@ -59,7 +59,7 @@ function openForm(el, p) {
       label: '削除',
       confirm: 'この投稿を削除しますか？',
       onClick: async () => {
-        await q(sb.from('posts').delete().eq('id', p.id));
+        await db.remove('posts', p.id);
         toast('削除しました');
         draw(el);
       },
@@ -73,9 +73,9 @@ function openForm(el, p) {
       };
       if (!row.title) { toast('タイトルを入力してください', 'error'); return false; }
       if (isEdit) {
-        await q(sb.from('posts').update({ ...row, updated_at: new Date().toISOString() }).eq('id', p.id));
+        await db.update('posts', p.id, { ...row, updated_at: serverTimestamp() });
       } else {
-        await q(sb.from('posts').insert({ ...row, member_id: state.meId }));
+        await db.add('posts', { ...row, member_id: state.meId });
       }
       toast(isEdit ? '更新しました' : '投稿しました');
       draw(el);

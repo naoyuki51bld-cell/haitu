@@ -49,9 +49,16 @@ export function fmtDateTime(iso) {
 }
 
 export function errMsg(err) {
+  const code = err?.code || '';
   const m = err?.message || String(err);
-  if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return '通信できませんでした。電波を確認してください。';
-  if (/JWT|session|not authenticated/i.test(m)) return 'ログインが切れました。再読み込みしてください。';
+  if (/invalid-credential|wrong-password|user-not-found|invalid-email/.test(code)) return '合言葉が違います';
+  if (/too-many-requests/.test(code)) return '何度も間違えたため、しばらくログインできません。少し待ってから試してください。';
+  if (/requires-recent-login/.test(code)) return '安全のため、一度ログアウトして入り直してから変更してください。';
+  if (/weak-password/.test(code)) return '合言葉は6文字以上にしてください。';
+  if (/unavailable|network-request-failed/.test(code) || /Failed to fetch|NetworkError|Load failed|offline/i.test(m)) {
+    return '通信できませんでした。電波を確認してください。';
+  }
+  if (/permission-denied|unauthenticated/.test(code)) return '権限がありません。ログインし直すか、セキュリティルールの設定を確認してください。';
   return 'エラー：' + m;
 }
 

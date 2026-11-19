@@ -1,4 +1,4 @@
-import { sb, q } from './db.js';
+import { db, where } from './db.js';
 import { state, memberById, chip, colorOf, memberOptions } from './state.js';
 import {
   esc, ymd, parseYmd, addDays, firstOfMonth, daysBetween, fmtDate, modal, toast, WEEK,
@@ -41,12 +41,14 @@ async function draw(el) {
   const gridEnd = addDays(last, 6 - last.getDay());
   const today = ymd(new Date());
 
-  const [inMonth, upcoming] = await Promise.all([
-    q(sb.from('reservations').select('*')
-      .lte('start_date', ymd(gridEnd)).gte('end_date', ymd(gridStart)).order('start_date')),
-    q(sb.from('reservations').select('*').gte('end_date', today).order('start_date').limit(30)),
+  const byStart = (a, b) => a.start_date.localeCompare(b.start_date);
+  const [fromGrid, fromToday] = await Promise.all([
+    db.list('reservations', where('end_date', '>=', ymd(gridStart))),
+    db.list('reservations', where('end_date', '>=', today)),
   ]);
   if (token !== drawToken) return; // 連打で古い結果が来たら捨てる
+  const inMonth = fromGrid.filter((r) => r.start_date <= ymd(gridEnd)).sort(byStart);
+  const upcoming = fromToday.sort(byStart).slice(0, 30);
 
   // ---- カレンダー ----
   let html = WEEK.map((w, i) =>
@@ -159,7 +161,7 @@ function openForm(el, r) {
       label: '削除',
       confirm: 'この予約を削除しますか？',
       onClick: async () => {
-        await q(sb.from('reservations').delete().eq('id', r.id));
+        await db.remove('reservations', r.id);
         toast('予約を削除しました');
         draw(el);
       },
@@ -178,16 +180,16 @@ function openForm(el, r) {
       };
 
       // 他の人の予約と重なっていないか確認
-      let oq = sb.from('reservations').select('*').lte('start_date', row.end_date).gte('end_date', row.start_date);
-      if (isEdit) oq = oq.neq('id', r.id);
-      const overlaps = (await q(oq)).filter((o) => nightsOverlap(o, row));
+      const candidates = await db.list('reservations', where('end_date', '>=', row.start_date));
+      const overlaps = candidates.filter((o) =>
+        o.id !== r.id && o.start_date <= row.end_date && nightsOverlap(o, row));
       if (overlaps.length) {
         const names = [...new Set(overlaps.map((o) => memberById(o.member_id)?.name ?? '?'))].join('さん、');
         if (!confirm(`${names}さんの予約と日程が重なっています。\nこのまま保存しますか？`)) return false;
       }
 
-      if (isEdit) await q(sb.from('reservations').update(row).eq('id', r.id));
-      else await q(sb.from('reservations').insert(row));
+      if (isEdit) await db.update('reservations', r.id, row);
+      else await db.add('reservations', row);
       toast(isEdit ? '予約を更新しました' : '予約しました');
       cursor = firstOfMonth(parseYmd(row.start_date));
       draw(el);

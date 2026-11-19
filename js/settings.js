@@ -1,4 +1,4 @@
-import { sb, q } from './db.js';
+import { db, authApi } from './db.js';
 import { state, COLORS, chip, me, memberOptions, loadMembers, loadSettings } from './state.js';
 import { esc, modal, toast, errMsg } from './util.js';
 
@@ -59,12 +59,11 @@ export async function renderSettings(el, ctx) {
     const f = e.target;
     const v = new FormData(f);
     try {
-      await q(sb.from('settings').upsert({
-        id: 1,
+      await db.set('settings', 'main', {
         house_name: String(v.get('house_name')).trim() || 'セカンドハウス',
         default_rent: Math.max(0, Math.round(Number(v.get('default_rent')) || 0)),
         default_payer_id: v.get('default_payer_id') || null,
-      }));
+      });
       await loadSettings();
       ctx.refreshHeader();
       toast('保存しました');
@@ -77,8 +76,9 @@ export async function renderSettings(el, ctx) {
     const pw = f.password.value;
     if (pw.length < 6) { toast('6文字以上にしてください', 'error'); return; }
     if (!confirm('合言葉を変更しますか？\n新しい合言葉をメンバーに伝えてください。')) return;
-    const { error } = await sb.auth.updateUser({ password: pw });
-    if (error) { toast(errMsg(error), 'error'); return; }
+    try {
+      await authApi.updatePassword(pw);
+    } catch (err) { toast(errMsg(err), 'error'); return; }
     f.reset();
     toast('合言葉を変更しました');
   };
@@ -123,11 +123,10 @@ export async function saveMember(form, m) {
   if (!row.name) { toast('名前を入力してください', 'error'); return null; }
   if (m.id) {
     row.active = v.get('active') === 'on';
-    await q(sb.from('members').update(row).eq('id', m.id));
+    await db.update('members', m.id, row);
     return m.id;
   }
-  const [created] = await q(sb.from('members').insert({ ...row, sort_order: state.members.length }).select());
-  return created.id;
+  return db.add('members', { ...row, active: true, sort_order: state.members.length });
 }
 
 function openMemberForm(el, ctx, m) {
