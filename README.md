@@ -15,7 +15,7 @@
 
 **使う仕組み**
 - データの保存とログイン：**Firebase**（Google）。無料で、しばらく使わなくても止まりません。
-- 公開：**Vercel**。無料で、GitHub に push すると自動で更新されます。
+- 公開：**GitHub Pages**。無料で、GitHub に push すると自動で更新されます。
 
 ---
 
@@ -52,13 +52,17 @@
 
 > `apiKey` は公開しても問題ない値です。データは「合言葉ログイン」と「セキュリティルール」で守られています。
 
-### 5. インターネットに公開する（Vercel）
+### 5. インターネットに公開する（GitHub Pages）
 
-1. https://vercel.com に GitHub アカウントでログインします。
-2. **Add New → Project** でこのリポジトリを選び、何も変えずに **Deploy** を押します。
-3. 発行された URL（`https://xxxx.vercel.app`）をメンバーに共有します。
+1. GitHub でこのリポジトリを開き、**Settings → General** の一番下「Danger Zone」で **Change visibility → Public** にします。
+   （無料プランの GitHub Pages は公開リポジトリでのみ使えます。設定値の `apiKey` は公開されても問題ありません。）
+2. **Settings → Pages** を開き、次のように設定して **Save** を押します。
+   - Source：**Deploy from a branch**
+   - Branch：**`claude/amazing-euler-01b8of`**、フォルダは **`/ (root)`**
+3. 1〜2分待つと、同じ画面に URL が表示されます。
+   **https://naoyuki51bld-cell.github.io/haitu/** をメンバーに共有してください。
 
-以降は GitHub に push するたびに自動で更新されます。
+以降は、このブランチに push するたびに自動で更新されます。
 
 ### 6. スマホのホーム画面に追加する
 
