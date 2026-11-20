@@ -6,12 +6,13 @@
 // =========================================================
 
 export const firebaseConfig = {
-  apiKey: 'YOUR-API-KEY',
-  authDomain: 'YOUR-PROJECT.firebaseapp.com',
-  projectId: 'YOUR-PROJECT',
-  storageBucket: 'YOUR-PROJECT.appspot.com',
-  messagingSenderId: '000000000000',
-  appId: 'YOUR-APP-ID',
+  apiKey: 'AIzaSyBuhVnrLAvvDXieyIdS1QK4g-zxU0RHmK8',
+  authDomain: 'hairy-647f6.firebaseapp.com',
+  projectId: 'hairy-647f6',
+  storageBucket: 'hairy-647f6.firebasestorage.app',
+  messagingSenderId: '101485023883',
+  appId: '1:101485023883:web:caee5be5483dd5f31d7a8e',
+  measurementId: 'G-H2WHQ08X36',
 };
 
 // 全員で共有するログイン用アカウントのメールアドレス。
