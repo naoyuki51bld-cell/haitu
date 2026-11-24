@@ -7,11 +7,12 @@ import { nightsInRange } from './calendar.js';
 
 // 4つの費用項目
 //  fixed : 毎月固定（金額は設定画面で決める）
-//  usage : 泊数に応じて配分（多く泊まった人ほど多く払う）
+//  usage : 前月の泊数に応じて配分（多く泊まった人ほど多く払う）
+//  ※ 各月のページの金額は、その月に「支払う」金額。光熱費は前月に使った分の請求なので、前月の泊数で割る。
 export const CATS = [
   { key: 'rent', label: '家賃', fixed: true, rule: '均等割り' },
   { key: 'parking', label: '駐車場', fixed: true, rule: '均等割り' },
-  { key: 'utilities', label: '光熱費', usage: true, rule: '泊数に応じて配分' },
+  { key: 'utilities', label: '光熱費', usage: true, rule: '前月の泊数に応じて配分' },
   { key: 'other', label: 'その他', rule: '均等割り' },
 ];
 const SETTING_KEY = { rent: 'default_rent', parking: 'default_parking' };
@@ -27,6 +28,9 @@ function monthRange(m) {
 }
 
 /** その月に各メンバーが泊まった夜の数 { memberId: 泊数 } */
+/** 'YYYY-MM' の前月を「10月」の形で */
+const prevLabel = (m) => `${Number(shiftMonth(m, -1).slice(5))}月`;
+
 async function loadNights(m) {
   const [from, to] = monthRange(m);
   const list = await db.list('reservations', where('last_night', '>=', from));
@@ -71,7 +75,7 @@ function defaultBill(m, history) {
 
 /**
  * 1人ずつの金額を計算。1円未満は切り捨て、端数は remainder（支払い者の負担）。
- * 光熱費は泊数の比で配分。対象者が誰も泊まっていなければ均等割り。
+ * 光熱費は（呼び出し側が渡す）前月の泊数の比で配分。対象者が誰も泊まっていなければ均等割り。
  */
 export function calc(b, nights) {
   const per = {};
@@ -126,11 +130,14 @@ async function draw(el) {
   const token = ++drawToken;
   const target = month;
   el.querySelector('[data-title]').textContent = fmtMonth(target);
+  // 読み込み中に前の月のボタンを押せないように消しておく
+  el.querySelector('[data-body]').innerHTML = '<p class="empty">読み込み中…</p>';
+  el.querySelector('[data-people]').innerHTML = '';
 
   const [saved, history, nights] = await Promise.all([
     db.get('bills', target),
     db.list('bills', orderBy('month', 'desc'), limit(24)),
-    loadNights(target),
+    loadNights(shiftMonth(target, -1)), // 光熱費は前月の泊数で配分
   ]);
   if (token !== drawToken) return;
 
@@ -142,7 +149,7 @@ async function draw(el) {
   const catLine = (c) => {
     const info = cats[c.key];
     let rule = `${info.ids.length}人で${c.rule}`;
-    if (c.usage && info.fallback) rule = `${info.ids.length}人で均等割り（宿泊なし）`;
+    if (c.usage && info.fallback) rule = `${info.ids.length}人で均等割り（${prevLabel(bill.month)}の宿泊なし）`;
     if (!info.ids.length && info.amount) rule = '<span class="warn">対象者がいません</span>';
     const label = c.key === 'other' && bill.other_note ? `その他（${esc(bill.other_note)}）` : c.label;
     return `<div><dt>${label}<span class="rule">${rule}</span></dt><dd>${yen(info.amount)}</dd></div>`;
@@ -224,7 +231,7 @@ async function draw(el) {
 function personHtml(m, p = { total: 0 }, n, bill, payer) {
   const isPayer = m.id === bill.payer_id;
   const parts = CATS.filter((c) => p[c.key] != null).map((c) =>
-    `${c.label} ${yen(p[c.key])}${c.usage ? `（${n}泊）` : ''}`);
+    `${c.label} ${yen(p[c.key])}${c.usage ? `（${prevLabel(bill.month)} ${n}泊）` : ''}`);
   let payRow = '';
   if (isPayer) {
     payRow = '<div class="pay-row muted small">みんなから受け取る人</div>';
@@ -282,7 +289,7 @@ function openForm(el, bill, nights) {
             <input name="${c.key}" type="number" inputmode="numeric" min="0" step="1" placeholder="0"
               aria-label="${c.label}（円）" value="${bill[c.key] || ''}">`}
           ${c.key === 'other' ? `<input name="other_note" maxlength="40" placeholder="内容（例：Wi-Fi、消耗品）" value="${esc(bill.other_note)}">` : ''}
-          ${c.usage ? `<p class="muted small">この月の泊数：${nightsText || 'なし'}<br>予約カレンダーから自動で計算します。</p>` : ''}
+          ${c.usage ? `<p class="muted small">${prevLabel(bill.month)}の泊数：${nightsText || 'なし'}<br>前月の予約カレンダーから自動で計算します。</p>` : ''}
           <div class="muted small">割る人</div>
           ${picks(c, bill.shares[c.key])}
         </fieldset>`).join('')}
