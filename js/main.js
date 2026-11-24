@@ -1,7 +1,7 @@
-import { authApi, configured } from './db.js';
+import { authApi, configured, db } from './db.js';
 import { SHARED_EMAIL } from './config.js';
 import { state, loadMembers, loadSettings, activeMembers, memberById, chip, colorOf } from './state.js';
-import { $, esc, toast, errMsg, modal } from './util.js';
+import { $, esc, toast, errMsg, modal, hashPin, PIN_INPUT } from './util.js';
 import { renderCalendar } from './calendar.js';
 import { renderMoney } from './money.js';
 import { renderBoard } from './board.js';
@@ -117,7 +117,7 @@ function renderWhoAmI() {
     </div>`;
   app.querySelector('.who-list').onclick = (e) => {
     const b = e.target.closest('[data-id]');
-    if (b) chooseMe(b.dataset.id);
+    if (b) askPin(b.dataset.id);
   };
   app.querySelector('[data-add]').onclick = () => modal({
     title: 'メンバーを追加',
@@ -130,6 +130,56 @@ function renderWhoAmI() {
       renderWhoAmI();
     },
   });
+}
+
+let pinFails = 0;
+let pinLockedUntil = 0;
+
+/** 名前を選んだら4桁のPINで本人確認。PIN未設定ならここで決める */
+async function askPin(id) {
+  await loadMembers().catch(() => {});
+  const m = memberById(id);
+  if (!m) return;
+  const hasPin = !!m.pin_hash;
+  const { dlg, form } = modal({
+    title: hasPin ? `${m.name}さんのPIN` : `${m.name}さんのPINを決める`,
+    content: hasPin ? `
+      <label class="field">4桁のPINを入力してください<input name="pin" ${PIN_INPUT}></label>
+      <p class="muted small">忘れた場合は、他のメンバーに「設定 → メンバー」からリセットしてもらってください。</p>` : `
+      <p class="muted small">本人確認のための4桁の数字を決めてください。次から名前を選ぶときに使います。</p>
+      <label class="field">新しいPIN（4桁の数字）<input name="pin" ${PIN_INPUT}></label>
+      <label class="field">もう一度<input name="pin2" ${PIN_INPUT}></label>`,
+    submitLabel: hasPin ? 'OK' : '決定',
+    onSubmit: async (f) => {
+      const pin = f.pin.value;
+      if (hasPin) {
+        if (Date.now() < pinLockedUntil) {
+          toast('間違いが続いたため、30秒待ってから入力してください', 'error');
+          return false;
+        }
+        if (await hashPin(m.id, pin) !== m.pin_hash) {
+          pinFails += 1;
+          if (pinFails >= 5) { pinFails = 0; pinLockedUntil = Date.now() + 30000; }
+          toast('PINが違います', 'error');
+          f.pin.value = '';
+          f.pin.focus();
+          return false;
+        }
+        pinFails = 0;
+      } else {
+        if (pin !== f.pin2.value) { toast('2回の入力が一致しません', 'error'); return false; }
+        await db.update('members', m.id, { pin_hash: await hashPin(m.id, pin) });
+        await loadMembers();
+      }
+      chooseMe(m.id);
+    },
+  });
+  // 4桁入れたら自動で確認
+  if (hasPin) {
+    form.pin.addEventListener('input', () => { if (/^\d{4}$/.test(form.pin.value)) form.requestSubmit(); });
+  }
+  form.pin.focus();
+  return dlg;
 }
 
 function chooseMe(id) {

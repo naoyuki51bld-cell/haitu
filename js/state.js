@@ -5,7 +5,7 @@ export const COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#
 
 export const state = {
   members: [],
-  settings: { id: 1, house_name: 'セカンドハウス', default_rent: 0, default_payer_id: null },
+  settings: { house_name: 'セカンドハウス', default_rent: 0, default_parking: 0, default_payer_id: null },
   meId: null,
 };
 

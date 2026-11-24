@@ -1,6 +1,6 @@
-import { db, authApi } from './db.js';
+import { db, authApi, deleteField } from './db.js';
 import { state, COLORS, chip, me, memberOptions, loadMembers, loadSettings } from './state.js';
-import { esc, modal, toast, errMsg } from './util.js';
+import { esc, modal, toast, errMsg, hashPin, PIN_INPUT } from './util.js';
 
 /** ctx: { switchUser, logout, refreshHeader } */
 export async function renderSettings(el, ctx) {
@@ -12,7 +12,10 @@ export async function renderSettings(el, ctx) {
         <span class="grow">使っている人：${chip(me())}</span>
         <button type="button" class="btn ghost small" data-switch>切り替え</button>
       </div>
-      <div class="row-end"><button type="button" class="btn danger-ghost" data-logout>ログアウト</button></div>
+      <div class="row-end">
+        <button type="button" class="btn ghost" data-pin>自分のPINを変更</button>
+        <button type="button" class="btn danger-ghost" data-logout>ログアウト</button>
+      </div>
     </section>
 
     <section class="card">
@@ -27,8 +30,11 @@ export async function renderSettings(el, ctx) {
         <label class="field">名前
           <input name="house_name" required maxlength="30" value="${esc(s.house_name)}">
         </label>
-        <label class="field">毎月の家賃（初期値・円）
+        <label class="field">家賃（毎月固定・円）
           <input name="default_rent" type="number" inputmode="numeric" min="0" step="1" value="${Number(s.default_rent) || 0}">
+        </label>
+        <label class="field">駐車場（毎月固定・円）
+          <input name="default_parking" type="number" inputmode="numeric" min="0" step="1" value="${Number(s.default_parking) || 0}">
         </label>
         <label class="field">いつもの支払い者
           <select name="default_payer_id">${memberOptions(s.default_payer_id, { allowEmpty: true })}</select>
@@ -51,6 +57,7 @@ export async function renderSettings(el, ctx) {
   el.querySelector('[data-switch]').onclick = ctx.switchUser;
   el.querySelector('[data-logout]').onclick = () => { if (confirm('この端末からログアウトしますか？')) ctx.logout(); };
   el.querySelector('[data-add-member]').onclick = () => openMemberForm(el, ctx, {});
+  el.querySelector('[data-pin]').onclick = () => openPinChange();
 
   drawMembers(el, ctx);
 
@@ -62,6 +69,7 @@ export async function renderSettings(el, ctx) {
       await db.set('settings', 'main', {
         house_name: String(v.get('house_name')).trim() || 'セカンドハウス',
         default_rent: Math.max(0, Math.round(Number(v.get('default_rent')) || 0)),
+        default_parking: Math.max(0, Math.round(Number(v.get('default_parking')) || 0)),
         default_payer_id: v.get('default_payer_id') || null,
       });
       await loadSettings();
@@ -114,7 +122,8 @@ export function memberFormContent(m) {
           </label>`).join('')}
       </div>
     </div>
-    ${m.id ? `<label class="check"><input type="checkbox" name="active" ${m.active ? 'checked' : ''}> 現在のメンバー（外すと精算の対象外になります）</label>` : ''}`;
+    ${m.id ? `<label class="check"><input type="checkbox" name="active" ${m.active ? 'checked' : ''}> 現在のメンバー（外すと精算の対象外になります）</label>` : ''}
+    ${m.id && m.pin_hash ? `<label class="check"><input type="checkbox" name="reset_pin"> PINをリセットする（PINを忘れたとき用。次に名前を選んだときに決め直します）</label>` : ''}`;
 }
 
 export async function saveMember(form, m) {
@@ -123,6 +132,10 @@ export async function saveMember(form, m) {
   if (!row.name) { toast('名前を入力してください', 'error'); return null; }
   if (m.id) {
     row.active = v.get('active') === 'on';
+    if (v.get('reset_pin') === 'on') {
+      if (!confirm(`${row.name}さんのPINをリセットしますか？`)) return null;
+      row.pin_hash = deleteField();
+    }
     await db.update('members', m.id, row);
     return m.id;
   }
@@ -141,6 +154,33 @@ function openMemberForm(el, ctx, m) {
       ctx.refreshHeader();
       toast('保存しました');
       drawMembers(el, ctx);
+    },
+  });
+}
+
+function openPinChange() {
+  const m = me();
+  modal({
+    title: '自分のPINを変更',
+    content: `
+      <label class="field">今のPIN<input name="old" ${PIN_INPUT}></label>
+      <label class="field">新しいPIN（4桁の数字）<input name="pin" ${PIN_INPUT}></label>
+      <label class="field">新しいPIN（もう一度）<input name="pin2" ${PIN_INPUT}></label>`,
+    submitLabel: '変更する',
+    onSubmit: async (form) => {
+      await loadMembers();
+      const cur = me();
+      if (cur?.pin_hash && await hashPin(m.id, form.old.value) !== cur.pin_hash) {
+        toast('今のPINが違います', 'error');
+        return false;
+      }
+      if (form.pin.value !== form.pin2.value) {
+        toast('新しいPINが一致しません', 'error');
+        return false;
+      }
+      await db.update('members', m.id, { pin_hash: await hashPin(m.id, form.pin.value) });
+      await loadMembers();
+      toast('PINを変更しました');
     },
   });
 }

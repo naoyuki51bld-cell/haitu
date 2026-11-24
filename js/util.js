@@ -48,6 +48,15 @@ export function fmtDateTime(iso) {
   return d.getFullYear() === now.getFullYear() ? `${md} ${time}` : `${d.getFullYear()}/${md} ${time}`;
 }
 
+/** 4桁PINのハッシュ（PINそのものは保存しない） */
+export async function hashPin(memberId, pin) {
+  const data = new TextEncoder().encode(`haitu:${memberId}:${pin}`);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export const PIN_INPUT = 'type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4" required autocomplete="off" class="pin-input"';
+
 export function errMsg(err) {
   const code = err?.code || '';
   const m = err?.message || String(err);
