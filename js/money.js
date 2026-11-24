@@ -16,6 +16,7 @@ export const CATS = [
   { key: 'other', label: 'その他', rule: '均等割り' },
 ];
 const SETTING_KEY = { rent: 'default_rent', parking: 'default_parking' };
+const DEFAULT_UTIL = ['水道', '電気', 'ガス'];
 
 let month = ym(new Date());
 let drawToken = 0;
@@ -46,11 +47,20 @@ async function loadNights(m) {
 function normalize(b) {
   const all = activeMembers().map((m) => m.id);
   const shares = b.shares || {};
+  let items;
+  if (Array.isArray(b.utility_items)) {
+    items = b.utility_items.map((it) => ({ label: String(it.label || ''), amount: num(it.amount) }));
+  } else if (num(b.utilities) > 0) {
+    items = [{ label: '光熱費', amount: num(b.utilities) }]; // 内訳のない古いデータ
+  } else {
+    items = DEFAULT_UTIL.map((label) => ({ label, amount: 0 }));
+  }
   return {
     ...b,
     rent: num(b.rent),
     parking: num(b.parking),
-    utilities: num(b.utilities),
+    utility_items: items,
+    utilities: items.reduce((sum, it) => sum + it.amount, 0),
     other: num(b.other),
     other_note: b.other_note || '',
     shares: Object.fromEntries(CATS.map((c) =>
@@ -65,7 +75,8 @@ function defaultBill(m, history) {
     month: m,
     rent: state.settings.default_rent,
     parking: state.settings.default_parking,
-    utilities: 0,
+    utility_items: (prev?.utility_items?.length ? prev.utility_items.map((it) => it.label) : DEFAULT_UTIL)
+      .map((label) => ({ label, amount: 0 })),
     other: 0,
     payer_id: prev?.payer_id ?? state.settings.default_payer_id ?? null,
     shares: prev?.shares,
@@ -152,7 +163,11 @@ async function draw(el) {
     if (c.usage && info.fallback) rule = `${info.ids.length}人で均等割り（${prevLabel(bill.month)}の宿泊なし）`;
     if (!info.ids.length && info.amount) rule = '<span class="warn">対象者がいません</span>';
     const label = c.key === 'other' && bill.other_note ? `その他（${esc(bill.other_note)}）` : c.label;
-    return `<div><dt>${label}<span class="rule">${rule}</span></dt><dd>${yen(info.amount)}</dd></div>`;
+    const subs = c.usage
+      ? bill.utility_items.filter((it) => it.amount > 0)
+        .map((it) => `<div class="sub"><dt>${esc(it.label)}</dt><dd>${yen(it.amount)}</dd></div>`).join('')
+      : '';
+    return `<div><dt>${label}<span class="rule">${rule}</span></dt><dd>${yen(info.amount)}</dd></div>${subs}`;
   };
   const body = el.querySelector('[data-body]');
   body.innerHTML = `
@@ -254,6 +269,15 @@ function personHtml(m, p = { total: 0 }, n, bill, payer) {
   </div>`;
 }
 
+function utilRow(it) {
+  return `<div class="util-row">
+    <input name="util_label" maxlength="20" placeholder="項目名" value="${esc(it.label)}" aria-label="内訳の名前">
+    <input name="util_amount" type="number" inputmode="numeric" min="0" step="1" placeholder="0"
+      value="${it.amount || ''}" aria-label="${esc(it.label || '内訳')}の金額（円）">
+    <button type="button" class="icon-btn" data-remove aria-label="この内訳を外す">✕</button>
+  </div>`;
+}
+
 function picks(c, selected) {
   const list = state.members.filter((m) => m.active || selected.includes(m.id));
   return `<div class="picks">${list.map((m) => `
@@ -285,7 +309,12 @@ function openForm(el, bill, nights) {
       ${CATS.map((c) => `
         <fieldset class="cat">
           <legend>${c.label} <span class="muted small">${c.rule}</span></legend>
-          ${c.fixed ? fixedField(c) : `
+          ${c.fixed ? fixedField(c) : c.usage ? `
+            <div data-util>${bill.utility_items.map(utilRow).join('')}</div>
+            <div class="util-foot">
+              <button type="button" class="btn ghost small" data-add-util>＋ 内訳を追加</button>
+              <span>合計 <strong data-util-total></strong></span>
+            </div>` : `
             <input name="${c.key}" type="number" inputmode="numeric" min="0" step="1" placeholder="0"
               aria-label="${c.label}（円）" value="${bill[c.key] || ''}">`}
           ${c.key === 'other' ? `<input name="other_note" maxlength="40" placeholder="内容（例：Wi-Fi、消耗品）" value="${esc(bill.other_note)}">` : ''}
@@ -300,6 +329,10 @@ function openForm(el, bill, nights) {
         toast('支払い者を選んでください', 'error');
         return false;
       }
+      if (v.utility_items.some((it) => !it.label)) {
+        toast('光熱費の内訳の名前を入力してください', 'error');
+        return false;
+      }
       const empty = CATS.find((c) => v[c.key] > 0 && !v.shares[c.key].length);
       if (empty) {
         toast(`${empty.label}を割る人を1人以上選んでください`, 'error');
@@ -311,6 +344,7 @@ function openForm(el, bill, nights) {
         rent: v.rent,
         parking: v.parking,
         utilities: v.utilities,
+        utility_items: v.utility_items,
         other: v.other,
         other_note: v.other_note,
         shares: v.shares,
@@ -331,6 +365,19 @@ function openForm(el, bill, nights) {
     const rows = state.members.filter((m) => per[m.id])
       .map((m) => `<div><span>${esc(m.name)}</span><strong>${yen(per[m.id].total)}</strong></div>`).join('');
     preview.innerHTML = `<div class="preview-title">合計 ${yen(total)}</div>${rows}`;
+    dlg.querySelector('[data-util-total]').textContent = yen(v.utilities);
+  };
+  const utilEl = dlg.querySelector('[data-util]');
+  dlg.querySelector('[data-add-util]').onclick = () => {
+    utilEl.insertAdjacentHTML('beforeend', utilRow({ label: '', amount: 0 }));
+    utilEl.lastElementChild.querySelector('input').focus();
+    update();
+  };
+  utilEl.onclick = (e) => {
+    const btn = e.target.closest('[data-remove]');
+    if (!btn) return;
+    btn.closest('.util-row').replaceWith();
+    update();
   };
   form.addEventListener('input', update);
   form.addEventListener('change', update);
@@ -345,11 +392,18 @@ function readForm(form, bill) {
   };
   const shares = Object.fromEntries(CATS.map((c) =>
     [c.key, $$(`[name=share_${c.key}]:checked`, form).map((i) => i.value)]));
+  const items = $$('.util-row', form)
+    .map((row) => ({
+      label: row.querySelector('[name=util_label]').value.trim(),
+      amount: num(row.querySelector('[name=util_amount]').value),
+    }))
+    .filter((it) => it.label || it.amount);
   return {
     payer_id: form.payer_id.value,
     rent: fixed('rent'),
     parking: fixed('parking'),
-    utilities: num(form.utilities.value),
+    utility_items: items,
+    utilities: items.reduce((sum, it) => sum + it.amount, 0),
     other: num(form.other.value),
     other_note: form.other_note.value.trim(),
     shares,

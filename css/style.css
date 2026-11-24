@@ -236,6 +236,10 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, .icon-btn:focus-v
 .pay-row .stamp { flex-basis: 100%; padding-left: 30px; }
 .cat { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 12px; margin: 0 0 12px; display: flex; flex-direction: column; gap: 8px; }
 .cat legend { font-weight: 700; padding: 0 4px; }
+.util-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px 40px; gap: 6px; align-items: center; }
+.util-row + .util-row { margin-top: 6px; }
+.util-row .icon-btn { width: 40px; height: 40px; font-size: 1rem; color: var(--muted); }
+.util-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .fixed-amount { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .picks { display: flex; flex-wrap: wrap; gap: 6px; }
 .pick { position: relative; cursor: pointer; }
