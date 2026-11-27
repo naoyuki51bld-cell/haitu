@@ -78,6 +78,7 @@ function normalize(b) {
     other: num(b.other),
     other_note: b.other_note || '',
     other_payer_id: b.other_payer_id || null,
+    utility_mode: b.utility_mode === 'equal' ? 'equal' : 'usage',
     shares: Object.fromEntries(CATS.map((c) =>
       [c.key, Array.isArray(shares[c.key]) ? shares[c.key] : all])),
     paid: b.paid || {},
@@ -110,9 +111,11 @@ export function calc(b, nights) {
   for (const c of CATS) {
     const amount = amountOf(b, c.key);
     const ids = (b.shares[c.key] || []).filter((id) => memberById(id));
-    const w = c.usage ? ids.map((id) => nights[id] || 0) : ids.map(() => 1);
+    // 光熱費でも「均等に割る」月は泊数を使わない
+    const byUsage = c.usage && b.utility_mode !== 'equal';
+    const w = byUsage ? ids.map((id) => nights[id] || 0) : ids.map(() => 1);
     const W = w.reduce((s, x) => s + x, 0);
-    const fallback = c.usage && W === 0;
+    const fallback = byUsage && W === 0;
     const weights = fallback ? ids.map(() => 1) : w;
     const T = fallback ? ids.length : W;
     let assigned = 0;
@@ -207,6 +210,7 @@ async function draw(el) {
       return `<div class="skipped"><dt>${c.label}<span class="rule">この月は支払いなし</span></dt><dd>—</dd></div>`;
     }
     let rule = `${info.ids.length}人で${c.rule}`;
+    if (c.usage && bill.utility_mode === 'equal') rule = `${info.ids.length}人で均等割り（この月は泊数を使わない）`;
     if (c.usage && info.fallback) rule = `${info.ids.length}人で均等割り（${prevLabel(bill.month)}の宿泊なし）`;
     if (!info.ids.length && info.amount) rule = '<span class="warn">対象者がいません</span>';
     if (c.own && split && info.amount) rule += ` · ${esc(otherPayer.name)}さんが立て替え`;
@@ -307,7 +311,7 @@ async function draw(el) {
 
 function personHtml(m, p = { total: 0 }, n, bill, moves) {
   const parts = CATS.filter((c) => p[c.key] != null).map((c) =>
-    `${c.label} ${yen(p[c.key])}${c.usage ? `（${prevLabel(bill.month)} ${n}泊）` : ''}`);
+    `${c.label} ${yen(p[c.key])}${c.usage && bill.utility_mode !== 'equal' ? `（${prevLabel(bill.month)} ${n}泊）` : ''}`);
   const incoming = moves.filter((t) => t.to === m.id);
   const outgoing = moves.filter((t) => t.from === m.id);
   const isReceiver = m.id === bill.payer_id || incoming.length > 0;
@@ -391,7 +395,7 @@ function openForm(el, bill, nights) {
       </label>
       ${CATS.map((c) => `
         <fieldset class="cat ${c.fixed && bill.skip[c.key] ? 'is-skipped' : ''}" data-cat="${c.key}">
-          <legend>${c.label} <span class="muted small">${c.rule}</span></legend>
+          <legend>${c.label} <span class="muted small" ${c.usage ? 'data-util-rule' : ''}>${c.rule}</span></legend>
           ${c.fixed ? fixedField(c) : c.usage ? `
             <div data-util>${bill.utility_items.map(utilRow).join('')}</div>
             <div class="util-foot">
@@ -405,7 +409,14 @@ function openForm(el, bill, nights) {
             <label class="field compact">支払った人（立て替えた人）
               <select name="other_payer_id">${otherPayerOptions}</select>
             </label>` : ''}
-          ${c.usage ? `<p class="muted small">${prevLabel(bill.month)}の泊数：${nightsText || 'なし'}<br>前月の予約カレンダーから自動で計算します。</p>` : ''}
+          ${c.usage ? `
+            <div class="field compact">割り方
+              <div class="seg">
+                <label><input type="radio" name="utility_mode" value="usage" ${bill.utility_mode !== 'equal' ? 'checked' : ''}><span>泊数に応じて配分</span></label>
+                <label><input type="radio" name="utility_mode" value="equal" ${bill.utility_mode === 'equal' ? 'checked' : ''}><span>均等に割る</span></label>
+              </div>
+            </div>
+            <p class="muted small" data-nights-note>${prevLabel(bill.month)}の泊数：${nightsText || 'なし'}<br>前月の予約カレンダーから自動で計算します。</p>` : ''}
           ${c.fixed ? '' : `<div class="muted small">割る人</div>${picks(c, bill.shares[c.key])}`}
         </fieldset>`).join('')}
       <div class="preview" data-preview></div>`,
@@ -440,6 +451,7 @@ function openForm(el, bill, nights) {
         other: v.other,
         other_note: v.other_note,
         other_payer_id: v.other_payer_id || null,
+        utility_mode: v.utility_mode,
         shares: v.shares,
         updated_at: serverTimestamp(),
         ...(otherPayerChanged ? { paid_other: deleteField() } : {}),
@@ -458,6 +470,9 @@ function openForm(el, bill, nights) {
     for (const key of Object.keys(SETTING_KEY)) {
       dlg.querySelector(`[data-cat="${key}"]`).classList.toggle('is-skipped', v.skip[key]);
     }
+    dlg.querySelector('[data-nights-note]').hidden = v.utility_mode === 'equal';
+    dlg.querySelector('[data-util-rule]').textContent =
+      v.utility_mode === 'equal' ? '均等割り' : '前月の泊数に応じて配分';
     const { per, total } = calc(v, nights);
     const rows = state.members.filter((m) => per[m.id])
       .map((m) => `<div><span>${esc(m.name)}</span><strong>${yen(per[m.id].total)}</strong></div>`).join('');
@@ -505,6 +520,7 @@ function readForm(form, bill) {
     other: num(form.other.value),
     other_note: form.other_note.value.trim(),
     other_payer_id: form.other_payer_id.value || null,
+    utility_mode: form.querySelector('[name=utility_mode]:checked')?.value === 'equal' ? 'equal' : 'usage',
     shares,
   };
 }

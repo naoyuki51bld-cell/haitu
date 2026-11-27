@@ -246,6 +246,13 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, .icon-btn:focus-v
 .cat.is-skipped { background: var(--surface-2); }
 .skip-toggle { font-size: .9rem; }
 .field.compact { margin-bottom: 0; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg label { position: relative; cursor: pointer; }
+.seg input { position: absolute; inset: 0; opacity: 0; margin: 0; min-height: 0; cursor: pointer; }
+.seg span { display: block; text-align: center; padding: 9px 6px; font-size: .88rem; font-weight: 600; color: var(--muted); }
+.seg label + label span { border-left: 1px solid var(--line); }
+.seg input:checked + span { background: var(--accent); color: var(--accent-ink); }
+.seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -3px; }
 .breakdown .skipped dt, .breakdown .skipped dd { color: var(--muted); font-weight: 400; }
 .pay-row .grow { flex: 1; min-width: 0; }
 .picks { display: flex; flex-wrap: wrap; gap: 6px; }
